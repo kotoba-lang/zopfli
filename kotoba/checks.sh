@@ -40,10 +40,10 @@ print("fixture independent inflate ok", expected.hex())
 PY
 
 compile_json=$(kotoba compile kotoba/zopfli.kotoba --target wasm --output "$work/zopfli.wasm" --json)
-echo "$compile_json" | python3 - "$work/zopfli.wasm" <<'PY'
-import json, sys
-wasm_path = sys.argv[1]
-d = json.load(sys.stdin)
+COMPILE_JSON="$compile_json" WASM_PATH="$work/zopfli.wasm" python3 <<'PY'
+import json, os
+wasm_path = os.environ["WASM_PATH"]
+d = json.loads(os.environ["COMPILE_JSON"])
 ok = d.get("kotoba.cli/ok?")
 code = d.get("kotoba.cli/code")
 data = d.get("kotoba.cli/data") or {}
@@ -88,9 +88,9 @@ print("wasm host-independent", len(blob), "bytes")
 PY
 
 run_json=$(kotoba compile kotoba/zopfli.kotoba --target web --output "$work/zopfli.mjs" --run --json)
-echo "$run_json" | python3 - <<'PY'
-import json, sys
-d = json.load(sys.stdin)
+RUN_JSON="$run_json" python3 <<'PY'
+import json, os
+d = json.loads(os.environ["RUN_JSON"])
 ok = d.get("kotoba.cli/ok?")
 code = d.get("kotoba.cli/code")
 data = d.get("kotoba.cli/data") or {}
