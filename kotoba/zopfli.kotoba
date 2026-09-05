@@ -1,0 +1,111 @@
+;; Kotoba v1 Zopfli encode surface (awai.network).
+;;
+;; Honest scope: stored (BTYPE=00) zlib of one short fixture, RFC 1950 + 1951.
+;; Same CMF/FLG construction as src/zopfli/zlib_container.c (CM=8, CINFO=7,
+;; FLEVEL=3 → 0x78 0xDA). Adler-32 and LEN/NLEN are computed.
+;;
+;; Not implemented: LZ77, Huffman, block splitting, Zopfli squeeze, gzip,
+;; dynamic/fixed deflate, PNG. Those will not fit on wasm32 i64-v1 without
+;; host imports or a silent stub.
+;;
+;; i64-v1 only: integers and explicit byte values. No IEEE floats, no strings,
+;; no vectors (nth would leave i64-v1 and import kotoba:typed).
+
+(ns zopfli.v1
+  (:export [main adler32-fixture zlib-len zlib-byte fixture-ok]))
+
+(defn- u8 [x :i64] :i64
+  (bit-and x 255))
+
+(defn- rem-u [n :i64 d :i64] :i64
+  (- n (* (quot n d) d)))
+
+(defn- byte1 [x :i64] :i64
+  (u8 (quot x 256)))
+
+(defn- byte2 [x :i64] :i64
+  (u8 (quot x 65536)))
+
+(defn- byte3 [x :i64] :i64
+  (u8 (quot x 16777216)))
+
+;; Known plaintext: ASCII "hello" as bytes.
+(defn fixture-len [] :i64 5)
+
+(defn fixture-plain [i :i64] :i64
+  (cond
+    (= i 0) 104
+    (= i 1) 101
+    (= i 2) 108
+    (= i 3) 108
+    :else 111))
+
+(defn adler32-fixture [] :i64
+  (let [n (fixture-len)]
+    (loop [i 0 s1 1 s2 0]
+      (if (< i n)
+        (let [s1n (rem-u (+ s1 (fixture-plain i)) 65521)]
+          (recur (+ i 1) s1n (rem-u (+ s2 s1n) 65521)))
+        (+ (* s2 65536) s1)))))
+
+(defn zlib-header [] :i64
+  (let [cmf 120
+        flevel 3
+        base (+ (* cmf 256) (* flevel 64))
+        fcheck (- 31 (rem-u base 31))]
+    (+ base fcheck)))
+
+(defn zlib-len [] :i64
+  (+ 11 (fixture-len)))
+
+(defn zlib-byte [i :i64] :i64
+  (let [n (fixture-len)
+        hdr (zlib-header)
+        ad (adler32-fixture)
+        nlen (- 65535 n)]
+    (cond
+      (= i 0) (byte1 hdr)
+      (= i 1) (u8 hdr)
+      (= i 2) 1
+      (= i 3) (u8 n)
+      (= i 4) (byte1 n)
+      (= i 5) (u8 nlen)
+      (= i 6) (byte1 nlen)
+      (< i (+ 7 n)) (fixture-plain (- i 7))
+      (= i (+ 7 n)) (byte3 ad)
+      (= i (+ 8 n)) (byte2 ad)
+      (= i (+ 9 n)) (byte1 ad)
+      :else (u8 ad))))
+
+;; Independently-checkable stored zlib of "hello":
+;; 78 da 01 05 00 fa ff 68 65 6c 6c 6f 06 2c 02 15
+(defn fixture-expected [i :i64] :i64
+  (cond
+    (= i 0) 120
+    (= i 1) 218
+    (= i 2) 1
+    (= i 3) 5
+    (= i 4) 0
+    (= i 5) 250
+    (= i 6) 255
+    (= i 7) 104
+    (= i 8) 101
+    (= i 9) 108
+    (= i 10) 108
+    (= i 11) 111
+    (= i 12) 6
+    (= i 13) 44
+    (= i 14) 2
+    :else 21))
+
+(defn fixture-ok [] :i64
+  (let [n (zlib-len)]
+    (loop [i 0]
+      (if (>= i n)
+        1
+        (if (= (zlib-byte i) (fixture-expected i))
+          (recur (+ i 1))
+          0)))))
+
+(defn main [] :i64
+  (fixture-ok))
